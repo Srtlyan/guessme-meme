@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GuessMe (мемы-версия)</title>
+<style>
+  :root { --bg:#0f1220; --card:#171a2b; --ink:#e8ebff; --muted:#a7add6; --accent:#7c9bff; --btn:#22263d; --btnHover:#2b3153; }
+  *{box-sizing:border-box} body{margin:0;background:radial-gradient(1200px 600px at 70% -10%, #1d2350 0%, #0f1220 60%); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:var(--ink)}
+  .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  h1{font-size:20px;margin:0}
+  .card{background:linear-gradient(180deg,#1a1f39 0%, #141831 100%); border:1px solid #2a2f53; border-radius:16px; padding:20px; box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .qtext{font-size:20px;margin:6px 0 14px}
+  .row{display:flex;flex-wrap:wrap;gap:10px}
+  button{appearance:none;border:1px solid #2a2f53;background:var(--btn);color:var(--ink);padding:12px 14px;border-radius:12px;cursor:pointer}
+  button:hover{background:var(--btnHover)}
+  .primary{background:linear-gradient(180deg,#3046b8,#2b3e9c);border:1px solid #3b53d6}
+  .secondary{background:transparent}
+  .muted{color:var(--muted)}
+  .toolbar{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .progress{height:8px;border-radius:999px;background:#222845;overflow:hidden;margin:10px 0 16px}
+  .progress>div{height:100%;background:linear-gradient(90deg,#6c86ff,#9aaeff);width:0%}
+  .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#22263d;border:1px solid #2a2f53;color:#cbd1ff;font-size:12px}
+  .grid{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:900px){ .grid{grid-template-columns:1.2fr .8fr} }
+  .panel{background:linear-gradient(180deg,#161a31,#12162b);border:1px solid #262b4a;border-radius:14px;padding:14px}
+  .panel h3{margin:0 0 8px;font-size:14px;color:#cbd1ff}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px 6px;border-bottom:1px dashed #2a2f53;font-size:14px}
+  th{text-align:left;color:#aeb6ff}
+  .small{font-size:13px;color:var(--muted)}
+  .result{font-size:18px;margin:6px 0}
+  .badge{font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>GuessMe — мемный квиз</h1>
+    <span class="pill" id="counter">Вопрос 1/—</span>
+  </header>
+
+  <div class="grid">
+    <div class="card" id="qaCard">
+      <div class="progress"><div id="bar"></div></div>
+      <div class="qtext" id="qtext">Подготовка…</div>
+      <div class="row" id="answers"></div>
+      <div class="toolbar">
+        <button id="backBtn" class="secondary">← Назад</button>
+        <button id="skipBtn" class="secondary">Пропустить</button>
+        <button id="finishBtn" class="primary">Завершить</button>
+        <span class="small">Отвечай мем-сердцем: Да / Скорее да / Не знаю / Скорее нет / Нет</span>
+      </div>
+      <p class="small" style="margin-top:10px">
+        Это развлекательная игра с вероятностными оценками по косвенным сигналам поп-культуры. Ничего не сохраняется.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h3>Текущие вероятности</h3>
+      <div id="probs"></div>
+    </div>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none; margin-top:16px">
+    <h2 style="margin:0 0 10px">Итоги</h2>
+    <div id="summary"></div>
+    <p class="small">Несогласен с выводом? Это нормально. В «боевой» версии веса обучаются на анонимной обратной связи.</p>
+  </div>
+</div>
+
+<script>
+/*** ── ответы ── ***/
+const ANSWERS = [
+  { label: "Да", score:  2 },
+  { label: "Скорее да", score:  1 },
+  { label: "Не знаю",   score:  0 },
+  { label: "Скорее нет",score: -1 },
+  { label: "Нет",       score: -2 },
+];
+
+/*** ── атрибуты ── ***/
+const ATTRS = {
+  gender: { title: "Пол", classes: ["Женщина","Мужчина","Другое"] },
+  age:    { title: "Возраст", classes: ["18–24","25–34","35–44","45–54","55+"] },
+  country:{ title: "Страна происхождения", classes: ["Portugal","Russia","USA","India"] },
+};
+
+/*** ── вопросы (только поп-культура/мемы/интернет) ──
+Вес умножается на численный ответ. Веса слабые и нейтральные. ***/
+const Q = [
+  // Эпохи интернета
+  {id:"e1", text:"В детстве вы застали массовую игру в Pokémon GO на улицах (лето 2016)?",
+    targets:{ age:{ "18–24": 1.0, "25–34": 0.4, "45–54": -0.3, "55+": -0.4 } } },
+  {id:"e2", text:"Вам знаком Vine-юмор (6-секундные видео 2013–2016) лучше, чем TikTok-тренды?",
+    targets:{ age:{ "25–34": 0.9, "35–44": 0.4, "18–24": -0.7 } } },
+  {id:"e3", text:"Вы делали Harlem Shake в 2013?",
+    targets:{ age:{ "25–34": 0.8, "35–44": 0.5 } } },
+  {id:"e4", text:"Вы помните MySpace/Tom и FarmVille как актуальные вещи?",
+    targets:{ age:{ "35–44": 0.9, "45–54": 0.7, "18–24": -0.6 } } },
+  {id:"e5", text:"Вы узнаёте «Nyan Cat» и «Doge» без подсказок?",
+    targets:{ age:{ "25–34": 0.7, "35–44": 0.5 } } },
+  {id:"e6", text:"Слово «sus» у вас ассоциируется с Among Us (2020)?",
+    targets:{ age:{ "18–24": 1.0, "25–34": 0.4 } } },
+  {id:"e7", text:"Вы видели/знаете «Skibidi Toilet» (2023)?",
+    targets:{ age:{ "18–24": 0.9, "25–34": 0.3, "55+": -0.4 } } },
+
+  // Игры/стриминг
+  {id:"g1", text:"Вы различаете по звуку фортнайтовский «default dance»?",
+    targets:{ age:{ "18–24": 0.6, "25–34": 0.4 } } },
+  {id:"g2", text:"Слова «Herobrine» и «крафтинг верстак» для вас родные?",
+    targets:{ age:{ "18–24": 0.6, "25–34": 0.5 } } },
+
+  // Глобальные мем-события
+  {id:"m1", text:"Вы участвовали (онлайн) в шутливом «штурме Area-51» в 2019?",
+    targets:{ age:{ "18–24": 0.6, "25–34": 0.5 } } },
+  {id:"m2", text:"Вы когда-нибудь «рикроллили» друзей (Rickroll)?",
+    targets:{ age:{ "25–34": 0.6, "35–44": 0.5 }, country:{ "USA": 0.2 } } },
+  {id:"m3", text:"Фраза «arrow to the knee» вызывает улыбку?",
+    targets:{ age:{ "25–34": 0.7, "35–44": 0.5 } } },
+
+  // Региональные мем-маркеры (аккуратно и нейтрально)
+  {id:"p1", text:"Кричок «Siuuu!» у вас напрямую ассоциируется с Криштиану Роналду и вы часто видите этот мем в локальном инфополе?",
+    targets:{ country:{ "Portugal": 1.1 } } },
+  {id:"p2", text:"Футбольные мемы вокруг Benfica/Porto/Sporting всплывают у вас регулярно?",
+    targets:{ country:{ "Portugal": 1.0 } } },
+  {id:"r1", text:"Мем «Ждун» вы узнали сразу?",
+    targets:{ country:{ "Russia": 1.0 } } },
+  {id:"r2", text:"Вы помните «внезапный» бум VK/Пикабу мемов 2010-х?",
+    targets:{ country:{ "Russia": 1.0 } } },
+  {id:"u1", text:"Фраза «Florida Man» для вас — отдельный жанр заголовков?",
+    targets:{ country:{ "USA": 1.0 } } },
+  {id:"u2", text:"Super Bowl для вас — не только спорт, но и мемы из реклам?",
+    targets:{ country:{ "USA": 1.0 } } },
+  {id:"i1", text:"Мемы из IPL (крикет) вы видите чаще футбольных?",
+    targets:{ country:{ "India": 1.2 } } },
+  {id:"i2", text:"Шутки про Jio/дешёвый интернет кажутся «своими»?",
+    targets:{ country:{ "India": 0.9 } } },
+
+  // Платформы/форматы
+  {id:"pl1", text:"Вы застали активные Skype-созвоны и массовый переход на Discord?",
+    targets:{ age:{ "25–34": 0.7, "18–24": 0.3, "45–54": -0.3 } } },
+  {id:"pl2", text:"У вас были «Snapchat streaks» с друзьями?",
+    targets:{ age:{ "18–24": 0.8, "25–34": 0.4 } } },
+
+  // Лёгкие косвенные гендерные сигналы (без стереотипов, очень слабые веса)
+  {id:"gx1", text:"Вы регулярно смотрите обзоры технологий/гаджетов (Marques Brownlee/Дудь-тех и т.п.)?",
+    targets:{ gender:{ "Мужчина": 0.3 } } },
+  {id:"gx2", text:"Вы чаще сохраняете трендовые танцевальные/челлендж-ролики в TikTok, чем техно-обзоры?",
+    targets:{ gender:{ "Женщина": 0.3 } } },
+  {id:"gx3", text:"Вы предпочитаете обращаться к вам гендерно-нейтрально в онлайне?",
+    targets:{ gender:{ "Другое": 0.6 } } },
+];
+
+/*** ── приоры и счёты ── ***/
+const priors = {}, scores = {};
+for (const key of Object.keys(ATTRS)) {
+  const classes = ATTRS[key].classes;
+  priors[key] = {}; scores[key] = {};
+  const p = 1 / classes.length, logp = Math.log(p);
+  for (const c of classes) { priors[key][c]=p; scores[key][c]=logp; }
+}
+
+const answers = []; // {id, score}
+
+/*** ── математика ── ***/
+function softmax(obj){ const vals=Object.values(obj); const mx=Math.max(...vals);
+  const exps=vals.map(v=>Math.exp(v-mx)); const sum=exps.reduce((a,b)=>a+b,0);
+  const out={}; Object.keys(obj).forEach((k,i)=>out[k]=exps[i]/sum); return out; }
+
+function probs(){ const r={}; for (const a of Object.keys(scores)) r[a]=softmax(scores[a]); return r; }
+
+function applyAnswer(qId, s){
+  const q = Q.find(x=>x.id===qId); if(!q||!q.targets) return;
+  for (const attr of Object.keys(q.targets)){
+    for (const cls of Object.keys(q.targets[attr])){
+      const w = q.targets[attr][cls]||0; scores[attr][cls]+=w*s;
+    }
+  }
+}
+function recalcAll(){
+  for (const a of Object.keys(scores)) for (const c of Object.keys(scores[a])) scores[a][c]=Math.log(priors[a][c]);
+  for (const a of answers) applyAnswer(a.id, a.score);
+}
+function fmtPct(x){ return (x*100).toFixed(1)+"%"; }
+
+/*** ── UI ── ***/
+const qtextEl=document.getElementById('qtext');
+const answersEl=document.getElementById('answers');
+const probsEl=document.getElementById('probs');
+const barEl=document.getElementById('bar');
+const counterEl=document.getElementById('counter');
+const resultCard=document.getElementById('resultCard');
+const summaryEl=document.getElementById('summary');
+
+let cursor=0;
+
+function renderAnswerButtons(){
+  answersEl.innerHTML="";
+  for (const a of ANSWERS){
+    const btn=document.createElement('button'); btn.textContent=a.label;
+    btn.onclick=()=>onAnswer(a.score); answersEl.appendChild(btn);
+  }
+}
+function renderQuestion(){
+  const q = Q[cursor]; if(!q){ finish(); return; }
+  qtextEl.textContent=q.text;
+  const total=Q.length, answered=answers.length;
+  barEl.style.width=Math.round((answered/total)*100)+"%";
+  counterEl.textContent=`Вопрос ${answered+1}/${total}`;
+}
+function renderProbs(){
+  const p=probs(); let html="";
+  for (const a of Object.keys(ATTRS)){
+    html+=`<div class="panel" style="background:none;border:none;padding:0;margin-bottom:8px">
+      <div class="small">${ATTRS[a].title}</div><table>`;
+    const entries=Object.entries(p[a]).sort((x,y)=>y[1]-x[1]);
+    for (const [cls,val] of entries){ html+=`<tr><td>${cls}</td><td>${fmtPct(val)}</td></tr>`; }
+    html+="</table></div>";
+  }
+  probsEl.innerHTML=html;
+}
+function nextIndex(){ for (let i=0;i<Q.length;i++){ if(!answers.find(a=>a.id===Q[i].id)) return i; } return Q.length; }
+function onAnswer(scoreVal){
+  const q=Q[cursor];
+  const idx=answers.findIndex(a=>a.id===q.id); if(idx>=0) answers.splice(idx,1);
+  answers.push({id:q.id, score:scoreVal}); recalcAll();
+  cursor=nextIndex(); renderQuestion(); renderProbs();
+}
+function back(){ if(answers.length===0) return;
+  const last=answers.pop(); recalcAll();
+  cursor=Q.findIndex(q=>q.id===last.id); renderQuestion(); renderProbs();
+}
+function skip(){ cursor=Math.min(cursor+1,Q.length); renderQuestion(); }
+function finish(){
+  const p=probs(); let html="";
+  for (const a of Object.keys(ATTRS)){
+    const entries=Object.entries(p[a]).sort((x,y)=>y[1]-x[1]);
+    const [best,bv]=entries[0]; html+=`<div class="result"><span class="badge">${ATTRS[a].title}:</span> ${best} (${fmtPct(bv)})</div>`;
+  }
+  summaryEl.innerHTML=html; resultCard.style.display="block";
+}
+
+document.getElementById('backBtn').onclick=back;
+document.getElementById('skipBtn').onclick=skip;
+document.getElementById('finishBtn').onclick=finish;
+
+renderAnswerButtons(); renderQuestion(); renderProbs();
+</script>
+</body>
+</html>
